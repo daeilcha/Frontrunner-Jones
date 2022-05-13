@@ -54,7 +54,7 @@ def analyze_block(block_number):
         (A) the event is a Transfer() method with data transmitted,
         (B) the event has positive value 
         (C) the event's sender/receiver are different,
-        (D) the sender has been a known receiver, and 
+        (D) the sender has been a known receiver of an event in this block, and 
         (E) that receiver's event precedes this event, 
         (F) the value of the preceding and this event are within a threshold
         
