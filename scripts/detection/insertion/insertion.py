@@ -45,63 +45,113 @@ def analyze_block(block_number):
     transfer_to = {}
     asset_transfers = {}
 
+    ###############################################
+    ### Iterate through all events in the block ###
+    ###############################################
     for event in events:
+        '''
+        If 
+        (A) the event is a Transfer() method with data transmitted,
+        (B) the event has positive value 
+        (C) the event's sender/receiver are different,
+        (D) the sender has been a known receiver, and 
+        (E) that receiver's event precedes this event, 
+        (F) the value of the preceding and this event are within a threshold
+        
+        (G) Then search for a whale event
+        '''
+
         # Ignore Wrapped ETH and Bancor ETH token transfers
         if (event["address"].lower() != "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2" and
             event["address"].lower() != "0xc0829421c1d260bd3cb3e0f06cfe2d52db2ce315"):
-
+            
+            ###########################################################
+            ### If the event is a Transfer() with data transmitted, ###
+            ### has positive value and whose sender/receiver are    ###
+            ### different, and if the sender has been a receiver,   ###
+            ### and that receiver's event precedes this event, and  ###
+            ### the value of the preceding event and this event     ###
+            ### are within a threshold then search for a whale event ###
+            ###########################################################
+            # (A) If the event has content in the data field, and the event has 3 topics in the logs
             if event["data"].replace("0x", "") and len(event["topics"]) == 3:
-                _from  = Web3.toChecksumAddress("0x"+event["topics"][1].hex().replace("0x", "")[24:64])
-                _to    = Web3.toChecksumAddress("0x"+event["topics"][2].hex().replace("0x", "")[24:64])
-                _value = int(event["data"].replace("0x", "")[0:64], 16)
+                _from  = Web3.toChecksumAddress("0x"+event["topics"][1].hex().replace("0x", "")[24:64]) # _from is the first topic
+                _to    = Web3.toChecksumAddress("0x"+event["topics"][2].hex().replace("0x", "")[24:64]) # _to is the second topic
+                _value = int(event["data"].replace("0x", "")[0:64], 16) # value is in the 'data' field...?
 
-                if _value > 0 and _from != _to:
+                # (B), (C)
+                if _value > 0 and _from != _to: # if value is positive and _from and _to are different
+                    # (D), (E)
                     if (event["address"]+_from in transfer_to and
-                        transfer_to[event["address"]+_from]["transactionIndex"] + 1 < event["transactionIndex"]):
+                        transfer_to[event["address"]+_from]["transactionIndex"] + 1 < event["transactionIndex"]): 
+                        # if the sender has been a known receiver, and that receiver's event precedes precedes this event
 
-                        event_a1 = transfer_to[event["address"]+_from]
-                        event_a2 = event
+                        event_a1 = transfer_to[event["address"]+_from] # front run tx is the transaction when the sender was a receiver
+                        event_a2 = event # back run tx is this event
 
-                        _from_a1  = Web3.toChecksumAddress("0x"+event_a1["topics"][1].hex().replace("0x", "")[24:64])
-                        _to_a1    = Web3.toChecksumAddress("0x"+event_a1["topics"][2].hex().replace("0x", "")[24:64])
-                        _value_a1 = int(event_a1["data"].replace("0x", "")[0:64], 16)
+                        _from_a1  = Web3.toChecksumAddress("0x"+event_a1["topics"][1].hex().replace("0x", "")[24:64]) # get the from address of the front run tx
+                        _to_a1    = Web3.toChecksumAddress("0x"+event_a1["topics"][2].hex().replace("0x", "")[24:64]) # get the to address of the back run tx
+                        _value_a1 = int(event_a1["data"].replace("0x", "")[0:64], 16) # get the value of the front run tx
 
-                        _from_a2  = Web3.toChecksumAddress("0x"+event_a2["topics"][1].hex().replace("0x", "")[24:64])
-                        _to_a2    = Web3.toChecksumAddress("0x"+event_a2["topics"][2].hex().replace("0x", "")[24:64])
-                        _value_a2 = int(event_a2["data"].replace("0x", "")[0:64], 16)
+                        _from_a2  = Web3.toChecksumAddress("0x"+event_a2["topics"][1].hex().replace("0x", "")[24:64]) # get from address of back run tx
+                        _to_a2    = Web3.toChecksumAddress("0x"+event_a2["topics"][2].hex().replace("0x", "")[24:64]) # get to address of back run tx
+                        _value_a2 = int(event_a2["data"].replace("0x", "")[0:64], 16) # get value of back run tx
 
-                        delta = abs(_value_a2 - _value_a1)/max(_value_a2, _value_a1)
-                        if delta <= TOKEN_AMOUNT_DELTA:
+                        delta = abs(_value_a2 - _value_a1)/max(_value_a2, _value_a1) # difference between the front run and back run tx's
+                        # (F)
+                        if delta <= TOKEN_AMOUNT_DELTA: # if the value of the front run and back run tx's are within the delta threshold
 
-                            # Search for whale
+                            # (G) Search for whale
+                            ''' 
+                            an asset transfer in this block is a whale event if 
+                            - the front run tx preceds this asset transfer
+                            - this even is a back run tx that follows this asset transfer
+                            - and this asset transfer isn't a known attacker
+                            - the front run tx's sender == the whale's sender
+                            - the whale's sender == the back run tx's receiver
+                            - the value of the whale tx > 0
+                            '''
                             event_w = None
-                            for asset_transfer in asset_transfers[event["address"]]:
+                            # for all asset transfers in this transaction, if the front run tx precedes this asset transfer, 
+                            # and this event is a back run tx that  follows this asset transfer, and this isn't an attacker
+                            for asset_transfer in asset_transfers[event["address"]]: 
                                 if (transfer_to[event["address"]+_from]["transactionIndex"] < asset_transfer["transactionIndex"] and
                                                                   event["transactionIndex"] > asset_transfer["transactionIndex"] and
                                     asset_transfer["transactionHash"].hex() not in attackers):
 
-                                    _from_w  = Web3.toChecksumAddress("0x"+asset_transfer["topics"][1].hex().replace("0x", "")[24:64])
-                                    _to_w    = Web3.toChecksumAddress("0x"+asset_transfer["topics"][2].hex().replace("0x", "")[24:64])
-                                    _value_w = int(asset_transfer["data"].replace("0x", "")[0:64], 16)
+                                    _from_w  = Web3.toChecksumAddress("0x"+asset_transfer["topics"][1].hex().replace("0x", "")[24:64]) # record whale's from address
+                                    _to_w    = Web3.toChecksumAddress("0x"+asset_transfer["topics"][2].hex().replace("0x", "")[24:64]) # record whale's to address
+                                    _value_w = int(asset_transfer["data"].replace("0x", "")[0:64], 16) # record whale tx's value
 
+                                    # if front run tx's `from` == whale's `from`, and whale's `from` == backrun tx's `to`, and whale's value > 0
                                     if _from_a1 == _from_w and _from_w == _to_a2 and _value_w > 0:
-                                        event_w = asset_transfer
+                                        event_w = asset_transfer # record this asset transfer as a whale event
 
+                            ######################################
+                            ### if there is a whale trade, get ###
+                            ### exchange name, total cost/gain ###
+                            ### and profit of sandwich attack  ###
+                            ######################################
                             if event_w:
-                                whales.add(event_w["transactionHash"].hex())
+                                whales.add(event_w["transactionHash"].hex()) # add the hex of the whale event to the `whales` set
 
+                                # if the front run and back run tx's are not whales
                                 if event_a1["transactionHash"].hex() not in whales and event_a2["transactionHash"].hex() not in whales:
-                                    _from_w  = Web3.toChecksumAddress("0x"+event_w["topics"][1].hex().replace("0x", "")[24:64])
-                                    _to_w    = Web3.toChecksumAddress("0x"+event_w["topics"][2].hex().replace("0x", "")[24:64])
-                                    _value_w = int(event_w["data"].replace("0x", "")[0:64], 16)
+                                    _from_w  = Web3.toChecksumAddress("0x"+event_w["topics"][1].hex().replace("0x", "")[24:64]) # record whale's from address
+                                    _to_w    = Web3.toChecksumAddress("0x"+event_w["topics"][2].hex().replace("0x", "")[24:64]) # record whale's to address
+                                    _value_w = int(event_w["data"].replace("0x", "")[0:64], 16) # record whale tx's value
 
+                                    # get the front run, whale, and back run transactions
                                     tx1      = w3.eth.getTransaction(event_a1["transactionHash"])
                                     whale_tx = w3.eth.getTransaction(event_w["transactionHash"])
                                     tx2      = w3.eth.getTransaction(event_a2["transactionHash"])
 
+                                    # if (front run's `from` != whale's `from`), and (back run's `from` != whale's `from`), and
+                                    # (front run's `gasPrice` > whale's `gasPrice`), and (back run's `gasPrice` <= whale's `gasPrice`)
                                     if (tx1["from"]     != whale_tx["from"]     and tx2["from"]     != whale_tx["from"] and
                                         tx1["gasPrice"]  > whale_tx["gasPrice"] and tx2["gasPrice"] <= whale_tx["gasPrice"]):
 
+                                        # if front run's `to` == whale's `to`, and front run's `from` != back run's `from`
                                         if tx1["to"] == whale_tx["to"] == tx2["to"] and tx1["from"] != tx2["from"]:
                                             continue
 
@@ -117,9 +167,13 @@ def analyze_block(block_number):
                                             except:
                                                 token_name = token_address
 
-                                        # Get exchange address and name
+                                        #########################
+                                        ### Get exchange name ###
+                                        #########################
                                         exchange_address = Web3.toChecksumAddress("0x"+event_w["topics"][1].hex().replace("0x", "")[24:64])
                                         exchange_name = None
+
+                                        # search the exchange name via the exchange contract
                                         # Uniswap V2 and SushiSwap
                                         if not exchange_name:
                                             try:
@@ -157,12 +211,18 @@ def analyze_block(block_number):
                                         if not exchange_name:
                                             exchange_name = exchange_address
 
+                                        ##################################################
+                                        ### calc total cost of front and back run tx's ###
+                                        ##################################################
                                         receipt1 = w3.eth.getTransactionReceipt(tx1["hash"])
                                         cost1 = receipt1["gasUsed"]*tx1["gasPrice"]
                                         receipt2 = w3.eth.getTransactionReceipt(tx2["hash"])
                                         cost2 = receipt2["gasUsed"]*tx2["gasPrice"]
                                         total_cost = cost1+cost2
 
+                                        ###########################################
+                                        ### calc gain/profit of sandwich attack ###
+                                        ###########################################
                                         gain = None
                                         eth_spent, eth_received, eth_whale = 0, 0, 0
                                         tx1_event, tx2_event, whale_event = None, None, None
@@ -345,6 +405,7 @@ def analyze_block(block_number):
                                                 collection.create_index('same_receiver')
                                                 collection.create_index('same_token_amount')
 
+                    # If not (D) and (E), then add this event's receiver to the dict `transfer_to`
                     transfer_to[event["address"]+_to] = event
                     if event["address"] not in asset_transfers:
                         asset_transfers[event["address"]] = []
