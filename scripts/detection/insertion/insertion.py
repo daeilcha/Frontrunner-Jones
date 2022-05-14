@@ -59,6 +59,8 @@ def analyze_block(block_number):
         (F) the value of the preceding and this event are within a threshold
         
         (G) Then search for a whale event
+
+        * ignore events whose address is WETH or Bancor ETH
         '''
 
         # Ignore Wrapped ETH and Bancor ETH token transfers
@@ -77,7 +79,7 @@ def analyze_block(block_number):
             if event["data"].replace("0x", "") and len(event["topics"]) == 3:
                 _from  = Web3.toChecksumAddress("0x"+event["topics"][1].hex().replace("0x", "")[24:64]) # _from is the first topic
                 _to    = Web3.toChecksumAddress("0x"+event["topics"][2].hex().replace("0x", "")[24:64]) # _to is the second topic
-                _value = int(event["data"].replace("0x", "")[0:64], 16) # value is in the 'data' field...?
+                _value = int(event["data"].replace("0x", "")[0:64], 16) # value is whatever is in the data field
 
                 # (B), (C)
                 if _value > 0 and _from != _to: # if value is positive and _from and _to are different
@@ -113,7 +115,8 @@ def analyze_block(block_number):
                             '''
                             event_w = None
                             # for all asset transfers in this transaction, if the front run tx precedes this asset transfer, 
-                            # and this event is a back run tx that  follows this asset transfer, and this isn't an attacker
+                            # and this event is a back run tx that follows this asset transfer, and this isn't an attacker
+                            # then record the asset transfer as a whale event
                             for asset_transfer in asset_transfers[event["address"]]: 
                                 if (transfer_to[event["address"]+_from]["transactionIndex"] < asset_transfer["transactionIndex"] and
                                                                   event["transactionIndex"] > asset_transfer["transactionIndex"] and
@@ -226,6 +229,9 @@ def analyze_block(block_number):
                                         gain = None
                                         eth_spent, eth_received, eth_whale = 0, 0, 0
                                         tx1_event, tx2_event, whale_event = None, None, None
+
+
+                                        # get front run, back run, and whale events
                                         for transfer_event in events:
                                             if   (not tx1_event and transfer_event["transactionHash"] == tx1["hash"] and transfer_event["address"] == "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" or # Wrapped ETH
                                                   not tx1_event and transfer_event["transactionHash"] == tx1["hash"] and transfer_event["address"] == "0xc0829421C1d260BD3cB3E0F06cfE2D52db2cE315"):  # Bancor ETH Token
@@ -238,6 +244,7 @@ def analyze_block(block_number):
                                                 whale_event = transfer_event
                                             if tx1_event and tx2_event and whale_event:
                                                 break
+                                        # eth spent is in front run tx, eth received is in back run tax; gain is the difference
                                         if tx1_event and tx2_event and whale_event:
                                             eth_spent = int(tx1_event["data"].replace("0x", "")[0:64], 16)
                                             eth_received = int(tx2_event["data"].replace("0x", "")[0:64], 16)
