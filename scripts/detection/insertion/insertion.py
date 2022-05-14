@@ -412,7 +412,7 @@ def analyze_block(block_number):
                                                 collection.create_index('same_receiver')
                                                 collection.create_index('same_token_amount')
 
-                    # If not (D) and (E), then add this event's receiver to the dict `transfer_to`
+                    # After (D) and (E), then add this event's receiver to the dict `transfer_to`
                     transfer_to[event["address"]+_to] = event
                     if event["address"] not in asset_transfers:
                         asset_transfers[event["address"]] = []
